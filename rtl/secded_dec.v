@@ -1,0 +1,28 @@
+module secded_dec(input [12:0]code_in,output [7:0]data_out,output corrected,output uncorrectable);
+localparam [12:0] M1 = 13'b0010101010101;
+localparam [12:0] M2 = 13'b0011001100110;
+localparam [12:0] M4 = 13'b0100001111000;
+localparam [12:0] M8 = 13'b0111110000000;
+wire s1,s2,s4,s8,ptot;
+wire [3:0] syn;
+assign s1 = ^(code_in & M1);
+assign s2 = ^(code_in & M2);
+assign s4 = ^(code_in & M4);
+assign s8 = ^(code_in & M8);
+assign ptot = ^code_in;
+assign syn = {s8,s4,s2,s1};
+assign corrected = ((ptot)&&(syn<=12));
+assign uncorrectable = ((syn > 12) && ptot) || ((syn != 0) && !ptot);
+wire [12:0] flip_mask ;
+assign flip_mask = ((ptot) && (syn > 0) && (syn <= 12)) ? (13'b1 << (syn - 1)) : 13'b0;
+wire [12:0] fixed;
+assign fixed = (code_in)^(flip_mask);
+assign data_out[0] = fixed[2];
+assign data_out[1] = fixed[4];
+assign data_out[2] = fixed[5];
+assign data_out[3] = fixed[6];
+assign data_out[4] = fixed[8];
+assign data_out[5] = fixed[9];
+assign data_out[6] = fixed[10];
+assign data_out[7] = fixed[11];
+endmodule
