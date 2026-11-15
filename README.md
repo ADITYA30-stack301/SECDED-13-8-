@@ -5,6 +5,7 @@ A simulation-based implementation of a **Single Error Correction, Double Error D
 This project was built while exploring fault-tolerant digital design and automotive-style safety mechanisms. It protects 8 data bits using a shortened Hamming code with an additional overall parity bit.
 
 The design can:
+
 - Correct any single-bit error.
 - Detect any double-bit error.
 - Identify uncorrectable error conditions.
@@ -107,7 +108,7 @@ The syndrome identifies the position of a single-bit error, while overall parity
 
 ### Error Classification
 
-| Syndrome | `ptot` | Interpretation | Corrected | Uncorrectable |
+| Syndrome | `ptot` | Interpretation | `corrected` | `uncorrectable` |
 |:---:|:---:|---|:---:|:---:|
 | 0 | 0 | No error | 0 | 0 |
 | 0 | 1 | Overall parity bit flipped | 1 | 0 |
@@ -152,17 +153,13 @@ The decoder flags these conditions as uncorrectable rather than attempting an in
 
 ```text
 SECDED-13-8/
-│
 ├── rtl/
 │   ├── secded_enc.v
 │   └── secded_dec.v
-│
 ├── tb/
-│   └── secded_codec_tb.v
-│
-├── sim/
-│   └── (compiled simulation output)
-│
+│   ├── secded_codec_tb.v
+│   └── triple_flip_tb.v
+├── sim/                  (compiled simulation output)
 ├── .gitignore
 └── README.md
 ```
@@ -179,7 +176,7 @@ The design was verified using **Icarus Verilog 12.0 (development build)**.
 - VS Code (recommended)
 - GTKWave (optional, for waveform inspection)
 
-### Running the Simulation
+### Running the Main Simulation
 
 Execute the following commands from the project root.
 
@@ -189,7 +186,7 @@ First, ensure the simulation directory exists:
 New-Item -ItemType Directory -Force sim
 ```
 
-Compile the design:
+Compile the main codec testbench:
 
 ```bash
 iverilog -s secded_codec_tb -o sim/codec.vvp rtl/secded_enc.v rtl/secded_dec.v tb/secded_codec_tb.v
@@ -201,14 +198,13 @@ Run the simulation:
 vvp sim/codec.vvp
 ```
 
-### Expected Output
+A passing run prints:
 
 ```text
 Encoder parity check : 0 failures / 256
 No-error test        : 0 failures / 256
 Single-error test    : 0 failures / 3328
 Double-error test    : 0 failures / 19968
-
 ALL TESTS PASSED
 ```
 
@@ -216,7 +212,7 @@ ALL TESTS PASSED
 
 ## 6. Exhaustive Testbench Coverage
 
-The testbench evaluates all 256 possible 8-bit input combinations.
+The main testbench evaluates all 256 possible 8-bit input combinations.
 
 | Test | Number of Cases | Verification |
 |---|---:|---|
@@ -224,7 +220,8 @@ The testbench evaluates all 256 possible 8-bit input combinations.
 | No-error test | 256 | Verifies unchanged data and inactive error flags |
 | Single-error test | 3,328 | Tests all 13 possible single-bit flips for every input |
 | Double-error test | 19,968 | Tests all 78 possible pairs of flipped bits for every input |
-| **Total** | **23,808** | **Exhaustive verification** |
+
+The main testbench executes **23,808 cases** in total, with 1 ns per case. The simulation ends at 23,808 ns, which is a handy sanity check that nothing got skipped.
 
 ### Independent Parity Verification
 
@@ -281,7 +278,7 @@ The recovered data is not checked in this test because SECDED does not guarantee
 
 ### Simulation Duration
 
-The testbench uses a 1 ns interval per test case.
+The main testbench uses a 1 ns interval per test case.
 
 The expected total simulation time is:
 
@@ -295,7 +292,7 @@ This provides an additional sanity check that all planned test cases were execut
 
 A passing testbench does not necessarily prove that the testbench itself can detect implementation bugs.
 
-To evaluate its effectiveness, intentional mutations were introduced into the decoder and the simulation was repeated.
+To evaluate its effectiveness, intentional mutations were introduced into the decoder and the simulation was repeated:
 
 | Mutation | No-error failures | Single-error failures | Double-error failures |
 |---|---:|---:|---:|
@@ -335,36 +332,124 @@ It provides additional confidence beyond simply observing a successful simulatio
 
 ---
 
-## 8. Limitations
+## 8. Triple-Bit Error Analysis
 
-The current implementation has several limitations:
+SECDED promises nothing beyond two flipped bits, so three-bit errors are treated as a measurement rather than a pass/fail check.
 
-- Verification covers only zero, single-bit and double-bit error conditions.
-- SECDED does not guarantee correct recovery from three or more bit errors.
-- No comparison has been performed against an unprotected data word or parity-only implementation.
-- No synthesis-based area or timing measurements are available.
-- No FPGA hardware validation has been performed.
-- The current implementation supports an 8-bit data word.
+Every possible combination of three flipped bits was applied to all 256 data values.
 
-Wider data words require additional Hamming parity bits, with the number of check bits determined by the Hamming-code sizing condition.
+The number of possible triple-bit error patterns is:
+
+\[
+\binom{13}{3} = 286
+\]
+
+Therefore, the total number of test cases is:
+
+\[
+286 \times 256 = 73,216
+\]
+
+Each case falls into exactly one of three categories:
+
+- **Detected:** `uncorrectable` goes high.
+- **Lucky:** `uncorrectable` remains low, and the recovered data is still correct. The `corrected` flag may be asserted because the decoder interprets the odd-parity syndrome as a correctable error.
+- **Silent corruption:** `uncorrectable` remains low, but the recovered data is wrong. The decoder may still assert `corrected`, even though the data is corrupted.
+
+### Running the Triple-Bit Simulation
+
+The triple-bit testbench is separate from the main codec testbench.
+
+Compile and run it from the project root:
+
+```bash
+iverilog -s secded_triple_tb -o sim/triple.vvp rtl/secded_enc.v rtl/secded_dec.v tb/triple_flip_tb.v
+vvp sim/triple.vvp
+```
+
+### Results
+
+| Outcome | Cases | Share |
+|---|---:|---:|
+| Detected | 16,896 | 23.1% |
+| Lucky | 0 | 0.0% |
+| Silent corruption | 56,320 | 76.9% |
+| **Total** | **73,216** | **100%** |
+
+### Why These Numbers?
+
+Three flips always make `ptot` equal to 1, so the decoder reads the syndrome as if it were a single error.
+
+The syndrome is the XOR of the three flipped Hamming positions. The overall parity bit counts as 0 because it is not part of any Hamming group.
+
+Some examples:
+
+| Flipped positions | Syndrome | What the decoder does | Data afterwards |
+|---|---:|---|---|
+| 3, 5, 6 | 0 | Treats it as a parity-bit flip and changes nothing | 3 data bits wrong |
+| 1, 2, 4 | 7 | "Fixes" position 7, a data bit | 1 data bit wrong |
+| 9, 10, 11 | 8 | "Fixes" position 8, a check bit | 3 data bits wrong |
+| 5, 11, 12 | 2 | "Fixes" position 2, a check bit | 3 data bits wrong |
+
+In all four cases, the decoder reports `corrected` while the data is wrong.
+
+**Detected = 66 × 256 = 16,896.**
+
+Of the 286 triples, 66 have a syndrome of 13, 14 or 15. These are invalid positions in this shortened code, so they are flagged as uncorrectable.
+
+**Lucky = 0.**
+
+In every undetected case, at least one data bit ends up wrong. If the syndrome is 0, the three flipped bits would all have to be check or parity bits, and three such bits never XOR to zero. If the syndrome is a valid position, the decoder flips a bit that was not one of the three flipped ones. For a triple made only of check/parity bits that produces a valid syndrome, that syndrome points to a data position.
+
+**Silent = 220 × 256 = 56,320.**
+
+Every remaining triple produces silent corruption.
+
+### Caveat
+
+These figures assume every 3-bit pattern is equally likely. Real fault mechanisms (for example, one particle strike disturbing neighbouring bits) favour particular patterns, so the real-world silent rate could look different.
+
+These results describe the behavior of this particular code under exhaustive triple-bit error injection. They should not be interpreted as a real-world failure probability.
+
+### Combined Verification Coverage
+
+The main codec testbench and the separate triple-bit testbench cover:
+
+| Simulation | Cases |
+|---|---:|
+| Main codec testbench (parity, no error, single error and double error) | 23,808 |
+| Triple-bit error testbench | 73,216 |
+| **Total across both simulations** | **97,024** |
+
+The two testbenches are run separately. The combined figure is the sum of their test cases, not the duration of a single simulation.
 
 ---
 
-## 9. Future Work
+## 9. What This Does Not Cover Yet
+
+- SECDED does not guarantee correct recovery from three or more bit errors. Triple-bit behavior has been measured, and the current results show that some triple-bit errors cause silent data corruption.
+- No comparison has been performed against an unprotected data word or parity-only implementation.
+- No synthesis-based area or timing measurements are available.
+- No FPGA hardware validation has been performed.
+- The current implementation supports an 8-bit data word. Wider words need more check bits (the number grows roughly with the log of the width).
+
+---
+
+## 10. Future Work
 
 The following extensions are planned:
 
-- [ ] Triple-bit error analysis and statistical evaluation.
 - [ ] Comparison with parity-only and unprotected memory implementations.
 - [ ] Logic synthesis and area estimation.
 - [ ] Timing analysis.
 - [ ] FPGA implementation and hardware validation.
 - [ ] Extension to wider data words.
+- [ ] Investigation of correlated multi-bit fault patterns and their impact on silent corruption.
 - [ ] Investigation of SECDED applications in automotive embedded systems and safety-oriented memory architectures.
 
 ---
 
-## 10. Project Motivation
+## 11. Project Motivation
 
 This project explores how error detection and correction can improve the reliability of digital systems.
 
