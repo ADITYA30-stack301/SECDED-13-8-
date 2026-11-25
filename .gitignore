@@ -1,16 +1,5 @@
-# Compiled Verilog files
-*.out
-*.vvp
-*.o
-*.exe
-
-# Waveform files
-*.vcd
-*.fst
-
-# Temporary files
-*.tmp
-*.bak
-
-# Editor files
-.vscode/
+codec
+crc
+crcf
+triple
+vec
