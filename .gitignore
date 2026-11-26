@@ -1,5 +1,22 @@
-codec
-crc
-crcf
-triple
-vec
+
+# Icarus Verilog simulation executables
+*.vvp
+
+# Simulation waveforms
+*.vcd
+
+# Temporary build files
+*.out
+*.log
+
+# Legacy generated executables
+/codec
+/crc
+/crcf
+/triple
+/vec
+
+# Python cache files
+__pycache__/
+*.py[cod]
+

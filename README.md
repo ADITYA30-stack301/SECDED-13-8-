@@ -1,59 +1,89 @@
-# SECDED (13,8) Encoder and Decoder in Verilog
 
-A simulation-based implementation of a **Single Error Correction, Double Error Detection (SECDED)** memory word using Verilog HDL.
+# SECDED (13,8) + CRC-8 Error-Control System
 
-This project was built while exploring fault-tolerant digital design and automotive-style safety mechanisms. It protects 8 data bits using a shortened Hamming code with an additional overall parity bit.
+A Verilog-based error-control design combining **Single Error Correction, Double Error Detection (SECDED)** with **CRC-8 error detection**, supported by exhaustive RTL verification, mutation testing, Yosys synthesis, post-synthesis validation, and Python-based BER analysis.
 
-The design can:
+## 1. Project Overview
 
-- Correct any single-bit error.
-- Detect any double-bit error.
-- Identify uncorrectable error conditions.
-- Verify functionality through exhaustive simulation rather than random testing.
+This project implements a shortened Hamming SECDED code for protecting 8-bit data words, together with a CRC-8 module for frame-level error detection.
 
-**Tools:** Verilog HDL · Icarus Verilog 12.0 · GTKWave (optional)
+### Key Features
 
-**Implementation status:** Simulation only. No FPGA hardware validation yet.
+- SECDED(13,8) encoder and decoder.
+- Single-bit error correction and double-bit error detection.
+- CRC-8 implementation using polynomial `0x07`.
+- Exhaustive functional verification.
+- Mutation testing of decoder logic.
+- Triple-bit error injection and silent-corruption analysis.
+- Python-based Monte Carlo BER modelling.
+- Yosys generic logic synthesis.
+- Post-synthesis netlist validation.
+
+### Tools Used
+
+- Verilog HDL
+- Icarus Verilog 12.0
+- GTKWave
+- Yosys 0.33
+- Python 3
+- NumPy
+- Matplotlib
+- Git
+
+### Implementation Status
+
+| Component | Status |
+|---|---|
+| SECDED encoder and decoder | Completed |
+| CRC-8 module | Completed |
+| Functional verification | Completed |
+| Mutation testing | Completed |
+| Triple-bit error analysis | Completed |
+| Python BER modelling | Completed |
+| Yosys synthesis | Completed |
+| Post-synthesis validation | Completed |
+| FPGA hardware validation | Not performed |
 
 ---
 
-## 1. Architecture
+## 2. System Architecture
 
-The design consists of two main modules:
+The project contains three primary RTL modules.
 
 | Module | Function |
 |---|---|
-| `secded_enc` | Encodes 8 data bits into a 13-bit SECDED codeword |
+| `secded_enc` | Encodes 8-bit data into a 13-bit SECDED codeword |
 | `secded_dec` | Detects and corrects single-bit errors and flags double-bit errors |
+| `crc_8` | Computes CRC-8 for an 8-bit input byte |
 
-### Encoder
+### Combined Frame Format
 
-The encoder accepts an 8-bit input and generates a 13-bit codeword containing:
+The behavioural model uses an eight-byte payload followed by one CRC byte.
 
-- 8 data bits
-- 4 Hamming check bits
-- 1 overall parity bit
+| Field | Size |
+|---|---:|
+| Payload | 8 bytes |
+| CRC-8 | 1 byte |
+| Total | 9 bytes |
 
-### Decoder
+Each byte is independently encoded using SECDED(13,8).
 
-The decoder accepts a potentially corrupted 13-bit codeword and produces:
+\[
+9 \times 13 = 117 \text{ bits per frame}
+\]
 
-| Output | Description |
-|---|---|
-| `data_out` | Recovered 8-bit data |
-| `corrected` | Indicates that a single-bit error was corrected |
-| `uncorrectable` | Indicates an uncorrectable error condition |
+The receiver performs SECDED decoding followed by CRC verification.
 
 ---
 
-## 2. Codeword Layout
+## 3. SECDED(13,8) Codeword Layout
 
-The first 12 positions follow the conventional Hamming code arrangement. The overall parity bit occupies the 13th position.
+The first 12 positions follow the conventional Hamming arrangement. The thirteenth position contains overall parity.
 
-**Verilog bit index = codeword position − 1**
+**Verilog bit index = codeword position - 1**
 
-| Position | Bit index | Contents |
-|:---:|:---:|:---:|
+| Position | Bit Index | Contents |
+|---:|---:|---|
 | 1 | 0 | p1 |
 | 2 | 1 | p2 |
 | 3 | 2 | d1 |
@@ -66,15 +96,9 @@ The first 12 positions follow the conventional Hamming code arrangement. The ove
 | 10 | 9 | d6 |
 | 11 | 10 | d7 |
 | 12 | 11 | d8 |
-| 13 | 12 | P (overall parity) |
+| 13 | 12 | Overall parity |
 
-The data mapping is:
-
-`d1` through `d8` correspond to `data[0]` through `data[7]`.
-
-### Parity Equations
-
-The four Hamming parity bits are calculated as:
+### Hamming Parity Equations
 
 ```verilog
 p1 = d1 ^ d2 ^ d4 ^ d5 ^ d7;
@@ -83,40 +107,30 @@ p4 = d2 ^ d3 ^ d4 ^ d8;
 p8 = d5 ^ d6 ^ d7 ^ d8;
 ```
 
-The overall parity bit is:
+Overall parity:
 
 ```verilog
 P = d1 ^ d2 ^ d3 ^ d5 ^ d6 ^ d8;
 ```
 
-This is a simplified expression.
-
-The overall parity bit is conceptually the XOR of all 12 other codeword bits. Since the Hamming check bits are themselves XOR combinations of data bits, substituting their expressions causes `d4` and `d7` to cancel out.
-
-Consequently, the simplified equation requires only six data-bit inputs.
-
 ---
 
-## 3. Decoder Logic
+## 4. SECDED Decoder Logic
 
-The decoder calculates two important quantities:
+The decoder calculates:
 
-1. **Syndrome:** A 4-bit value obtained from the four Hamming parity groups.
-2. **Overall parity (`ptot`):** XOR of all 13 received bits.
-
-The syndrome identifies the position of a single-bit error, while overall parity distinguishes odd-numbered errors from even-numbered errors.
+1. A four-bit syndrome using the Hamming parity groups.
+2. Overall parity (`ptot`) using all 13 received bits.
 
 ### Error Classification
 
-| Syndrome | `ptot` | Interpretation | `corrected` | `uncorrectable` |
-|:---:|:---:|---|:---:|:---:|
-| 0 | 0 | No error | 0 | 0 |
-| 0 | 1 | Overall parity bit flipped | 1 | 0 |
-| 1–12 | 1 | Single-bit error | 1 | 0 |
-| 13–15 | 1 | Invalid shortened-code position | 0 | 1 |
-| Nonzero | 0 | Double-bit error | 0 | 1 |
-
-### Correction Mechanism
+| Syndrome | `ptot` | Interpretation |
+|---|---:|---|
+| 0 | 0 | No error |
+| 0 | 1 | Overall parity-bit error |
+| 1–12 | 1 | Single-bit error |
+| 13–15 | 1 | Invalid shortened-code position |
+| Nonzero | 0 | Double-bit error |
 
 For a valid single-bit error, the decoder generates a correction mask:
 
@@ -124,248 +138,143 @@ For a valid single-bit error, the decoder generates a correction mask:
 corrected_word = received_word ^ (13'b1 << (syn - 1));
 ```
 
-The correction is enabled only when:
-
-- `ptot = 1`
-- Syndrome is between 1 and 12.
-
-The overall parity bit is handled separately because it is located at bit index 12 and is not part of the four Hamming parity groups.
-
-### Design Decisions
-
-Two implementation choices deserve attention:
-
-**1. Overall parity-bit correction**
-
-When only the overall parity bit flips, the syndrome remains zero and `ptot` becomes one.
-
-The data is already correct, but the decoder asserts `corrected` because a single-bit error has been identified and handled.
-
-**2. Invalid syndrome handling**
-
-Syndromes 13, 14 and 15 do not correspond to valid positions in this shortened Hamming code.
-
-The decoder flags these conditions as uncorrectable rather than attempting an invalid correction.
+Syndromes 13, 14 and 15 are flagged as uncorrectable.
 
 ---
 
-## 4. Repository Structure
+## 5. CRC-8 Implementation
+
+The CRC module uses:
+
+| Parameter | Value |
+|---|---|
+| Polynomial | `0x07` |
+| Initial CRC | `0x00` |
+| Processing | MSB-first |
+| Input width | 8 bits |
+| CRC width | 8 bits |
+
+The generator polynomial is:
+
+\[
+G(x)=x^8+x^2+x+1
+\]
+
+CRC is calculated sequentially over the eight payload bytes.
+
+### CRC Verification
+
+A reference-vector testbench evaluates 1,000 frames.
+
+**Result: 1,000 / 1,000 passed with zero mismatches.**
+
+---
+
+## 6. Repository Structure
 
 ```text
-SECDED-13-8/
+SECDED/
 ├── rtl/
 │   ├── secded_enc.v
-│   └── secded_dec.v
+│   ├── secded_dec.v
+│   └── crc8_byte.v
+│
 ├── tb/
+│   ├── secded_enc_tb.v
 │   ├── secded_codec_tb.v
-│   └── triple_flip_tb.v
-├── sim/                  (compiled simulation output)
+│   ├── secded_vec_tb.v
+│   ├── triple_flip_tb.v
+│   ├── crc8_tb.v
+│   ├── crc_vector_tb.v
+│   └── hello_tb.v
+│
+├── SYNTH/
+│   ├── netlists/
+│   ├── reports/
+│   ├── scripts/
+│   └── validation/
+│
+├── models/
+│   ├── pipeline_model.py
+│   ├── make_plots.py
+│   └── sweep.csv
+│
+├── results/
+│   ├── ber_sweep.png
+│   └── ber_theory_overlay.png
+│
+├── vectors.mem
+├── crc_frames.mem
 ├── .gitignore
 └── README.md
 ```
 
 ---
 
-## 5. Simulation and Verification
+## 7. Functional Verification
 
-The design was verified using **Icarus Verilog 12.0 (development build)**.
+The RTL design was verified using Icarus Verilog.
 
-### Prerequisites
+### Main SECDED Codec Testbench
 
-- Icarus Verilog
-- VS Code (recommended)
-- GTKWave (optional, for waveform inspection)
+All 256 possible 8-bit input combinations were tested.
 
-### Running the Main Simulation
-
-Execute the following commands from the project root.
-
-First, ensure the simulation directory exists:
-
-```powershell
-New-Item -ItemType Directory -Force sim
-```
-
-Compile the main codec testbench:
-
-```bash
-iverilog -s secded_codec_tb -o sim/codec.vvp rtl/secded_enc.v rtl/secded_dec.v tb/secded_codec_tb.v
-```
-
-Run the simulation:
-
-```bash
-vvp sim/codec.vvp
-```
-
-A passing run prints:
-
-```text
-Encoder parity check : 0 failures / 256
-No-error test        : 0 failures / 256
-Single-error test    : 0 failures / 3328
-Double-error test    : 0 failures / 19968
-ALL TESTS PASSED
-```
-
----
-
-## 6. Exhaustive Testbench Coverage
-
-The main testbench evaluates all 256 possible 8-bit input combinations.
-
-| Test | Number of Cases | Verification |
+| Test | Cases | Result |
 |---|---:|---|
-| Encoder parity | 256 | Checks even parity across all four Hamming groups and overall parity |
-| No-error test | 256 | Verifies unchanged data and inactive error flags |
-| Single-error test | 3,328 | Tests all 13 possible single-bit flips for every input |
-| Double-error test | 19,968 | Tests all 78 possible pairs of flipped bits for every input |
+| Encoder parity | 256 | 0 failures |
+| No-error test | 256 | 0 failures |
+| Single-bit error test | 3,328 | 0 failures |
+| Double-bit error test | 19,968 | 0 failures |
+| **Total** | **23,808** | **0 failures** |
 
-The main testbench executes **23,808 cases** in total, with 1 ns per case. The simulation ends at 23,808 ns, which is a handy sanity check that nothing got skipped.
-
-### Independent Parity Verification
-
-The encoder parity check uses independently defined parity masks in the testbench.
-
-For each Hamming group:
-
-```verilog
-^(code & M1) == 0
-```
-
-The same check is performed for the other three groups.
-
-Overall parity is independently verified using:
-
-```verilog
-^code == 0
-```
-
-This avoids simply repeating the encoder's parity equations in the testbench and provides an independent consistency check.
-
-### Single-Bit Error Testing
-
-For each of the 256 possible input combinations:
-
-- Each of the 13 codeword bits is flipped individually.
-- The decoder must recover the original data.
-- `corrected` must be asserted.
-- `uncorrectable` must remain deasserted.
-
-Total cases:
-
-**256 × 13 = 3,328**
-
-### Double-Bit Error Testing
-
-For each input combination:
-
-- All possible pairs of codeword bits are flipped.
-- The decoder must assert `uncorrectable`.
-- `corrected` must remain deasserted.
-
-There are:
+Single-bit error cases:
 
 \[
-\binom{13}{2} = 78
+256 \times 13 = 3,328
 \]
 
-Total cases:
+Double-bit error cases:
 
-**256 × 78 = 19,968**
+\[
+256 \times \binom{13}{2} = 19,968
+\]
 
-The recovered data is not checked in this test because SECDED does not guarantee correct recovery from double-bit errors.
+### Reference-Vector Verification
 
-### Simulation Duration
-
-The main testbench uses a 1 ns interval per test case.
-
-The expected total simulation time is:
-
-**23,808 ns**
-
-This provides an additional sanity check that all planned test cases were executed.
+| Test | Cases | Result |
+|---|---:|---|
+| SECDED reference vectors | 23,552 | 0 mismatches |
+| CRC-8 reference frames | 1,000 | 0 mismatches |
 
 ---
 
-## 7. Mutation Testing
+## 8. Mutation Testing
 
-A passing testbench does not necessarily prove that the testbench itself can detect implementation bugs.
-
-To evaluate its effectiveness, intentional mutations were introduced into the decoder and the simulation was repeated:
+Intentional decoder modifications were introduced to evaluate testbench effectiveness.
 
 | Mutation | No-error failures | Single-error failures | Double-error failures |
 |---|---:|---:|---:|
 | Original design | 0 | 0 | 0 |
-| Change `syn <= 12` to `syn <= 11` in correction flag logic | 0 | 256 | 0 |
+| Change `syn <= 12` to `syn <= 11` | 0 | 256 | 0 |
 | Flip one bit of mask M4 | 128 | 1,408 | 640 |
 | Apply both mutations | 128 | 1,536 | 640 |
-| Remove `(syn > 0)` from correction enable | 0 | 0 | 0 |
+| Remove `(syn > 0)` guard | 0 | 0 | 0 |
 
-### Mutation Analysis
-
-**Mutation 1: Incorrect syndrome boundary**
-
-Changing the correction condition from `syn <= 12` to `syn <= 11` causes the decoder to fail for all 256 input combinations when the error occurs at syndrome position 12.
-
-This confirms that the testbench covers the highest valid syndrome position.
-
-**Mutation 2: Incorrect parity mask**
-
-Flipping one bit in M4 affects syndrome generation for a subset of inputs.
-
-The resulting failures appear across no-error, single-error and double-error tests.
-
-**Mutation 3: Removing the zero-syndrome guard**
-
-Removing `(syn > 0)` from the correction enable produced no failures in simulation.
-
-This is an equivalent mutant for the tested implementation: when the syndrome is zero, the attempted shift does not produce a correction bit in the 13-bit word.
-
-The guard is retained in the original design to make the intended correction condition explicit and avoid depending on shift-width behavior.
-
-### Why Mutation Testing Matters
-
-Mutation testing helps evaluate whether the testbench can detect specific classes of implementation defects.
-
-It provides additional confidence beyond simply observing a successful simulation.
+The equivalent mutant produced no failures in the tested simulation.
 
 ---
 
-## 8. Triple-Bit Error Analysis
+## 9. Triple-Bit Error Analysis
 
-SECDED promises nothing beyond two flipped bits, so three-bit errors are treated as a measurement rather than a pass/fail check.
-
-Every possible combination of three flipped bits was applied to all 256 data values.
-
-The number of possible triple-bit error patterns is:
+All possible combinations of three flipped bits were applied to all 256 input values.
 
 \[
-\binom{13}{3} = 286
+\binom{13}{3}=286
 \]
-
-Therefore, the total number of test cases is:
 
 \[
-286 \times 256 = 73,216
+286 \times 256 = 73,216 \text{ cases}
 \]
-
-Each case falls into exactly one of three categories:
-
-- **Detected:** `uncorrectable` goes high.
-- **Lucky:** `uncorrectable` remains low, and the recovered data is still correct. The `corrected` flag may be asserted because the decoder interprets the odd-parity syndrome as a correctable error.
-- **Silent corruption:** `uncorrectable` remains low, but the recovered data is wrong. The decoder may still assert `corrected`, even though the data is corrupted.
-
-### Running the Triple-Bit Simulation
-
-The triple-bit testbench is separate from the main codec testbench.
-
-Compile and run it from the project root:
-
-```bash
-iverilog -s secded_triple_tb -o sim/triple.vvp rtl/secded_enc.v rtl/secded_dec.v tb/triple_flip_tb.v
-vvp sim/triple.vvp
-```
 
 ### Results
 
@@ -376,85 +285,168 @@ vvp sim/triple.vvp
 | Silent corruption | 56,320 | 76.9% |
 | **Total** | **73,216** | **100%** |
 
-### Why These Numbers?
+These results describe the behaviour of this specific implementation under exhaustive triple-bit error injection. They are not real-world failure probabilities.
 
-Three flips always make `ptot` equal to 1, so the decoder reads the syndrome as if it were a single error.
-
-The syndrome is the XOR of the three flipped Hamming positions. The overall parity bit counts as 0 because it is not part of any Hamming group.
-
-Some examples:
-
-| Flipped positions | Syndrome | What the decoder does | Data afterwards |
-|---|---:|---|---|
-| 3, 5, 6 | 0 | Treats it as a parity-bit flip and changes nothing | 3 data bits wrong |
-| 1, 2, 4 | 7 | "Fixes" position 7, a data bit | 1 data bit wrong |
-| 9, 10, 11 | 8 | "Fixes" position 8, a check bit | 3 data bits wrong |
-| 5, 11, 12 | 2 | "Fixes" position 2, a check bit | 3 data bits wrong |
-
-In all four cases, the decoder reports `corrected` while the data is wrong.
-
-**Detected = 66 × 256 = 16,896.**
-
-Of the 286 triples, 66 have a syndrome of 13, 14 or 15. These are invalid positions in this shortened code, so they are flagged as uncorrectable.
-
-**Lucky = 0.**
-
-In every undetected case, at least one data bit ends up wrong. If the syndrome is 0, the three flipped bits would all have to be check or parity bits, and three such bits never XOR to zero. If the syndrome is a valid position, the decoder flips a bit that was not one of the three flipped ones. For a triple made only of check/parity bits that produces a valid syndrome, that syndrome points to a data position.
-
-**Silent = 220 × 256 = 56,320.**
-
-Every remaining triple produces silent corruption.
-
-### Caveat
-
-These figures assume every 3-bit pattern is equally likely. Real fault mechanisms (for example, one particle strike disturbing neighbouring bits) favour particular patterns, so the real-world silent rate could look different.
-
-These results describe the behavior of this particular code under exhaustive triple-bit error injection. They should not be interpreted as a real-world failure probability.
-
-### Combined Verification Coverage
-
-The main codec testbench and the separate triple-bit testbench cover:
+### Combined SECDED Simulation Coverage
 
 | Simulation | Cases |
 |---|---:|
-| Main codec testbench (parity, no error, single error and double error) | 23,808 |
-| Triple-bit error testbench | 73,216 |
-| **Total across both simulations** | **97,024** |
-
-The two testbenches are run separately. The combined figure is the sum of their test cases, not the duration of a single simulation.
+| Main codec testbench | 23,808 |
+| Triple-bit testbench | 73,216 |
+| **Total** | **97,024** |
 
 ---
 
-## 9. What This Does Not Cover Yet
+## 10. Python-Based BER Analysis
 
-- SECDED does not guarantee correct recovery from three or more bit errors. Triple-bit behavior has been measured, and the current results show that some triple-bit errors cause silent data corruption.
-- No comparison has been performed against an unprotected data word or parity-only implementation.
-- No synthesis-based area or timing measurements are available.
+A separate Python behavioural model was developed using NumPy to evaluate the combined SECDED + CRC system over a Binary Symmetric Channel (BSC).
+
+### Simulation Configuration
+
+- Frame size: 9 bytes.
+- Encoded frame size: 117 bits.
+- Frames per channel probability: 400,000.
+- Number of channel probabilities: 14.
+- Random seed: `2026`.
+- Channel model: Independent bit flips with probability `p`.
+
+### Compared Configurations
+
+**SECDED + CRC-8**
+
+- SECDED encoding of payload and CRC.
+- Bit-error injection.
+- SECDED decoding.
+- CRC verification.
+
+**Uncoded CRC-8 baseline**
+
+- Payload and CRC transmitted without SECDED.
+- CRC verification at the receiver.
+
+### BER Results
+
+| Channel BER | SECDED + CRC Post-BER | Uncoded CRC Post-BER | Retransmission Rate |
+|---:|---:|---:|---:|
+| 3.16e-4 | 1.13e-6 | 3.15e-4 | 7.750e-5 |
+| 5.10e-4 | 3.28e-6 | 5.17e-4 | 1.925e-4 |
+| 8.23e-4 | 8.01e-6 | 8.26e-4 | 4.575e-4 |
+| 1.33e-3 | 2.14e-5 | 1.33e-3 | 1.177e-3 |
+| 2.14e-3 | 4.97e-5 | 2.14e-3 | 2.992e-3 |
+| 3.46e-3 | 1.38e-4 | 3.46e-3 | 7.865e-3 |
+| 5.57e-3 | 3.66e-4 | 5.59e-3 | 2.082e-2 |
+| 8.99e-3 | 9.35e-4 | 9.02e-3 | 5.181e-2 |
+| 1.45e-2 | 2.36e-3 | 1.45e-2 | 1.247e-1 |
+| 2.34e-2 | 5.98e-3 | 2.34e-2 | 2.814e-1 |
+| 3.78e-2 | 1.46e-2 | 3.78e-2 | 5.477e-1 |
+| 6.09e-2 | 3.43e-2 | 6.09e-2 | 8.424e-1 |
+| 9.82e-2 | 7.56e-2 | 9.82e-2 | 9.844e-1 |
+| 1.58e-1 | 1.51e-1 | 1.58e-1 | 9.999e-1 |
+
+The model measures post-decoding payload BER before retransmission-based frame rejection. Undetected frames are also tracked separately.
+
+### BER Sweep
+
+![BER Sweep](results/ber_sweep.png)
+
+### Theoretical Reference Overlay
+
+![BER Theory Overlay](results/ber_theory_overlay.png)
+
+The theoretical curves are simplified reference models. The maximum relative deviation between the simulated SECDED retransmission rate and its reference curve was 10.7% at the lowest simulated channel probability.
+
+---
+
+## 11. Yosys Synthesis
+
+The three RTL modules were synthesized independently using Yosys.
+
+### Generic Cell Counts
+
+| Module | Generic Cells |
+|---|---:|
+| SECDED encoder | 18 |
+| SECDED decoder | 108 |
+| CRC-8 | 40 |
+| **Total** | **166** |
+
+### Cell Breakdown
+
+**SECDED Encoder**
+- 18 XOR cells.
+
+**SECDED Decoder**
+- 14 AND cells.
+- 37 MUX cells.
+- 9 NOT cells.
+- 11 OR cells.
+- 37 XOR cells.
+
+**CRC-8**
+- 16 MUX cells.
+- 16 NOT cells.
+- 8 XOR cells.
+
+Generated netlists are stored in `SYNTH/netlists/`, and synthesis reports are stored in `SYNTH/reports/`.
+
+These are generic logic-cell counts, not FPGA LUT utilization, ASIC area, or physical timing measurements.
+
+---
+
+## 12. Post-Synthesis Netlist Validation
+
+The synthesized Verilog netlists were validated using Icarus Verilog.
+
+| Validation | Cases / Frames | Result |
+|---|---:|---|
+| SECDED encoder netlist | 256 | 0 failures |
+| Combined SECDED codec netlists | 23,808 | 0 failures |
+| SECDED reference-vector netlist | 23,552 | 0 mismatches |
+| CRC-8 netlist | 1,000 | 0 mismatches |
+| **Total** | **48,616** | **0 failures/mismatches** |
+
+The total is the sum of separate validation runs, not a count of unique vectors.
+
+---
+
+## 13. Limitations
+
+- SECDED does not guarantee correct recovery from three or more bit errors.
+- Triple-bit error analysis demonstrates possible silent corruption.
+- The Python model is a behavioural reference model, not direct RTL co-simulation.
+- The channel model assumes independent bit errors.
+- CRC-8 has a finite undetected-error probability.
+- Generic synthesis results do not represent physical area or timing.
 - No FPGA hardware validation has been performed.
-- The current implementation supports an 8-bit data word. Wider words need more check bits (the number grows roughly with the log of the width).
+- No ASIC physical implementation or timing closure has been performed.
 
 ---
 
-## 10. Future Work
+## 14. Future Work
 
-The following extensions are planned:
-
-- [ ] Comparison with parity-only and unprotected memory implementations.
-- [ ] Logic synthesis and area estimation.
-- [ ] Timing analysis.
-- [ ] FPGA implementation and hardware validation.
+- [ ] Direct RTL co-simulation with the Python behavioural model.
+- [ ] Comparison with parity-only and unprotected implementations.
+- [ ] FPGA synthesis and resource utilization analysis.
+- [ ] Timing analysis and critical-path investigation.
+- [ ] FPGA hardware validation.
 - [ ] Extension to wider data words.
-- [ ] Investigation of correlated multi-bit fault patterns and their impact on silent corruption.
-- [ ] Investigation of SECDED applications in automotive embedded systems and safety-oriented memory architectures.
+- [ ] Investigation of correlated multi-bit errors.
+- [ ] Evaluation of alternative CRC polynomials.
 
 ---
 
-## 11. Project Motivation
+## 15. Project Significance
 
-This project explores how error detection and correction can improve the reliability of digital systems.
+This project combines error-control coding, digital logic design, exhaustive verification, fault injection, synthesis and behavioural reliability analysis.
 
-SECDED is particularly relevant to memory protection, fault-tolerant computing and safety-oriented embedded architectures.
+It provides practical experience with:
 
-The project focuses not only on implementing an encoder and decoder, but also on understanding parity mathematics, syndrome-based error localization, exhaustive verification and mutation testing.
-
-**Current focus:** Moving from simulation-based verification toward synthesis, implementation and quantitative hardware analysis.
+- Verilog RTL design.
+- Syndrome-based error correction.
+- CRC-based error detection.
+- Exhaustive testbench development.
+- Mutation testing.
+- Multi-bit fault analysis.
+- Yosys synthesis.
+- Post-synthesis netlist validation.
+- Python-based BER modelling.
